@@ -1,0 +1,56 @@
+# --- run output / results / captures (regenerable) ---
+results/
+**/output/
+**/output_old/
+**/logs/
+*.data
+*.data.old
+perf.data*
+*.svg
+
+# --- build artifacts ---
+**/target/
+*.class
+*.o
+*.ko
+*.a
+*.so
+*.so.*
+*.d
+.*.cmd
+*.bin
+*.pyc
+__pycache__/
+# compiled benchmark binaries
+ycsb
+fio
+
+# --- optional upstream source trees not vendored here ---
+repos/YCSB-cpp/leveldb/
+
+# --- editor / misc ---
+*.swp
+.DS_Store
+
+# --- AI-instruction / working notes (kept on disk, never committed) ---
+DO_NOT_READ/
+progress_new.md
+progress_old*.md
+prompt_2.md
+prompt*.md
+
+# regenerated cp/tar cold dataset (15GB)
+repos/command_test/generate_dir/
+
+# root output keeps tracked gnuplot scripts plus regenerated AE outputs
+!/output/
+output/*
+!output/scripts/
+!output/scripts/**
+output/raw_data/
+output/figures/
+output/figure_manifest.txt
+output/figure_render.log
+
+# local JDK installs are host-specific; install a system JDK or set AE_JAVA_HOME.
+repos/jdk-17.0.12/

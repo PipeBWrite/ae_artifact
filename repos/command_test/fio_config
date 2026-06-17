@@ -1,0 +1,86 @@
+#!/bin/bash
+
+# Custom script
+# export custom_run_script="./filebench/filebench_run.sh"
+
+# Whether to disable NUMA nodes
+export envsetup_disable_numa=1
+
+# FIO run CPU
+export fio_taskset_cpu="20,24,28,32"
+
+export write_patterns="write"
+export threads="4"
+export total_sizes="5G"
+export runtimes="300" # 5min
+export direct="0"
+export fsync="0"
+export time_based="0"
+export blk_size="16k"
+
+# Number of wqs to use, default 4
+export wq_threads=1
+export dsa_emu_lock_wait=2
+export dsa_emu_force_fg=40
+export enable_bdp=1
+# BGPLAN: ADD(1) | BLK_W_B(2) | WE(4)
+export dsa_emu_bgplan=7
+
+export use_pmem="/dev/pmem0"
+export use_perf=0
+export pmem_fs="ext4"
+
+export debug_save_dmesg=0
+export debug_perf_events=""
+export debug_perf_matrics=""
+# export debug_perf_record_events="cpu/event=0xd1,umask=0x20,name=MEM_LOAD_RETIRED.L3_MISS/ppp"
+# export debug_perf_record_events="cpu/event=0xd1,umask=0x10,name=MEM_LOAD_RETIRED.L2_MISS/ppp"
+# export debug_perf_record_events="cpu/event=0x2e,umask=0x41,name=LONGEST_LAT_CACHE.MISS/ppp"
+export debug_perf_record_events="cpu/cycles/ppp"
+export debug_save_pqos=0
+export debug_save_iostat=0
+
+export enable_smt=0
+
+export bg_use_blkname="pmem0"
+export stats_use_blkname="pmem0"
+
+if [[ $debug_save_pqos == 1 && $use_perf == 1 ]]; then
+    echo "ERR: debug_save_pqos and use_perf can't be enabled at the same time"
+    exit 1
+fi
+
+export debug_custom_bin="./custom_test/a.out"
+export debug_custom_bin_args=""
+
+export debug_fio_verify_orig=0
+export debug_fio_verify_async=0
+
+# Dummy for DSA
+export inode_nums="0 dummy"
+
+# BDP
+export enable_bdp=0
+
+# Detect based on hostname
+hn=$(hostname)
+if [[ -f ./config-${hn}.sh ]]; then
+    echo "INFO: Load config-${hn}.sh"
+    source ./config-${hn}.sh
+fi
+
+function detect_runtime_var {
+    if [[ -f /proc/lock_stat ]]; then
+        echo "INFO: lock_stat is enabled"
+        export debug_lock_stat=1
+    else
+        echo "INFO: lock_stat is disabled"
+        export debug_lock_stat=0
+    fi
+}
+
+detect_runtime_var
+
+if [[ -z $fg_loop ]]; then
+	fg_loop="$dsa_emu_force_fg"
+fi

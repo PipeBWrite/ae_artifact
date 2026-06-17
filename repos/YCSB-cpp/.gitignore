@@ -1,0 +1,15 @@
+*.o
+*.d
+
+ycsb
+
+.vimrc
+tags
+compile_commands.json
+.clangd/
+.cache/
+
+output/
+output_old/
+
+perf.data*

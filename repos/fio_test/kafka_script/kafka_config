@@ -1,0 +1,27 @@
+#!/bin/bash
+# Kafka producer benchmark - determined "coloc4" configuration.
+# Broker single-NUMA (node 0) is mandatory (~2x swing); BG workers co-located on
+# node 0 inside the broker CPU set; producers spread across nodes 1-3 (auto).
+# Per-producer MB/s = device_bw / producer_count, so paper raws need 120 producers.
+
+export enable_smt=0
+export use_perf=0
+export pmem_fs_list="ext4 xfs"
+export use_pmem="${AE_DEVICE:-/dev/nvme0n1}"
+export bg_use_blkname="${AE_DEVICE_MAJMIN:-259:0}"
+export stats_use_blkname="${AE_DEVICE_MAJMIN:-259:0}"
+
+export kafka_iothreads=8
+export kafka_producers=120
+export kafka_wqs=4
+export kafka_cpu_list="$(seq -s, 0 4 76)"   # all 20 node-0 CPUs
+export kafka_server_numa=0
+export kafka_dsa_numa=0
+export kafka_server_cpu_offset=0
+export kafka_producer_numas="auto"
+export kafka_inode_nums="${AE_KAFKA_INODE_NUMS:-0 dummy}"           # orig (BW) + async (PBW) by default
+export kafka_sizes=4096
+export kafka_num_records=300000
+export dsa_poll_usecs=""
+export kafka_orig_enable_double=1
+export envsetup_disable_numa=0
