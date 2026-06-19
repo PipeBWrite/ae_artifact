@@ -131,6 +131,13 @@ After `scripts/run_all.sh` completes, the final rendered figures are under
 `output/raw_data/`, and the full-suite manifest records these paths as
 `output_figures_dir` and `output_raw_data_dir`.
 
+> You may notice that the plotting scripts under `output/scripts/` hardcode the
+> data values (e.g. the absolute raw-value labels drawn on the RocksDB and Log4j
+> bars). This is expected — `scripts/render_figures.py` overrides them in place
+> with the real measured values from each run's `output/raw_data/*.dat` during
+> figure rendering, so the figures produced after evaluation reflect your run
+> rather than the committed placeholders.
+
 Paper figure mapping:
 
 | Paper figure | Content | Rendered output |
