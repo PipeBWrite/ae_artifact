@@ -80,9 +80,8 @@ make -C repos/YCSB-cpp -j"$(nproc)" \
 ```
 
 The YCSB command above creates `repos/YCSB-cpp/ycsb` and links RocksDB from the
-installed static library reported by `pkg-config rocksdb`, so `ldd
-repos/YCSB-cpp/ycsb` should not list `librocksdb.so`. The Log4j command creates
-`repos/log_bench/java-logger-benchmark/jmh-benchmarks/target/dependency`.
+installed static library reported by `pkg-config rocksdb` (we use RocksDB 10.2.1).
+The Log4j command creates `repos/log_bench/java-logger-benchmark/jmh-benchmarks/target/dependency`.
 
 Finally verify the prepared environment:
 
@@ -97,7 +96,7 @@ Log4j's `jmh-benchmarks/target/dependency`, the Kafka scripts, passwordless
 
 ## Preflight
 
-The benchmark device is destructive. By default the scripts use
+**The benchmark device is destructive.** By default the scripts use
 `/dev/nvme0n1` mounted at `/mnt/pmem`; change `scripts/ae_common.sh` only if the
 review host uses a different disposable device.
 
@@ -119,16 +118,8 @@ Expected wall-clock time for a complete `scripts/run_all.sh` run is roughly
 scripts/run_all.sh
 ```
 
-The full suite runs:
-
-- RocksDB/YCSB orig+async
-- Kafka orig+async
-- command-line cp/tar orig+async
-- FIO synthetic orig+async
-- FIO ablation
-- Log4j orig+async
-- StreamCache-only suite for RocksDB/YCSB, command-line tools, FIO, Log4j, and Kafka
-- `.dat` export and figure rendering
+The full suite runs RocksDB, Kafka, command-line tools, FIO, Log4j and ablation tests, and
+plots figures in the paper.
 
 The top-level status file is written to `results/full_ae_<timestamp>/FULL_AE.md`,
 with exact output paths in `results/full_ae_<timestamp>/manifest.env`.
