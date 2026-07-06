@@ -6,6 +6,7 @@ use_perf="${use_perf:-0}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AE_ROOT="${AE_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 LINUX_DIR="${LINUX_DIR:-$HOME/linux}"
+COMMAND_TOOLS_CONFIG="$AE_ROOT/scripts/command_tools_config.sh"
 DEVICE="${DEVICE:-/dev/nvme0n1}"
 MOUNT_POINT="${MOUNT_POINT:-/mnt/pmem}"
 TEST_PATH="${TEST_PATH:-$AE_ROOT/results/command_scache}"
@@ -14,49 +15,39 @@ STAT_DISK_NUM="${STAT_DISK_NUM:-259:0}"
 BG_DISK_NUM="${BG_DISK_NUM:-0:0}"
 SCACHE_NR_REGIONS="${SCACHE_NR_REGIONS:-80}"
 FS_TYPES="${FS_TYPES:-xfs ext4}"
+COMMAND_READ_AHEAD_KB="${COMMAND_READ_AHEAD_KB:-4096}"
 
 mkdir -p "$TEST_PATH"
 
-write_sysfs() {
-    local value="$1"
-    local path="$2"
-
-    if [[ -f "$path" ]]; then
-        echo "$value" | sudo tee "$path" > /dev/null
-    fi
-}
+if [[ ! -f "$COMMAND_TOOLS_CONFIG" ]]; then
+    echo "missing command-tools config helper: $COMMAND_TOOLS_CONFIG" >&2
+    exit 1
+fi
+# shellcheck source=scripts/command_tools_config.sh
+source "$COMMAND_TOOLS_CONFIG"
 
 setup_scache() {
-    write_sysfs "$STAT_DISK_NUM" /sys/kernel/stats/stats_allowed_dev_name
-    write_sysfs 0 /sys/kernel/stats/stats
-    write_sysfs "$BG_DISK_NUM" /sys/kernel/stats/bg_allowed_dev_name
-
-    write_sysfs 0 /sys/fs/dsa_emu/dsa_emu_thread_numa
-    write_sysfs 0 /sys/fs/dsa_emu/enable_bdp
-    write_sysfs 0 /sys/fs/dsa_emu/force_node
-    write_sysfs 0 /sys/fs/dsa_emu/force_node_nid
-    write_sysfs 0 /sys/fs/dsa_emu/prefetch
-    write_sysfs 0 /sys/fs/dsa_emu/no_zero_alloc
-    write_sysfs 0 /sys/fs/dsa_emu/num_threads
-    write_sysfs 1 /proc/sys/kernel/numa_balancing
-
-    write_sysfs "$SCACHE_NR_REGIONS" /sys/fs/sc_memory/nr_regions
-    write_sysfs 1 /sys/fs/sc_memory/enabled
-    write_sysfs 1 /sys/kernel/stats/thread_init
+    command_tools_configure_scache "$STAT_DISK_NUM" "$BG_DISK_NUM" "$SCACHE_NR_REGIONS"
 }
 
 teardown_scache() {
-    write_sysfs 0 /sys/fs/sc_memory/enabled
-    write_sysfs 0 /sys/kernel/stats/stats
-    write_sysfs "$BG_DISK_NUM" /sys/kernel/stats/bg_allowed_dev_name
+    command_tools_write_sysfs 0 /sys/fs/sc_memory/enabled
+    command_tools_write_sysfs 0 /sys/kernel/stats/stats
+    command_tools_write_sysfs "$BG_DISK_NUM" /sys/kernel/stats/bg_allowed_dev_name
 }
 
-trap teardown_scache EXIT
+cleanup() {
+    teardown_scache
+    command_tools_restore_readahead
+}
+
+trap cleanup EXIT
 
 prepare_mount() {
     local fs_type="$1"
 
-    sudo umount "$DEVICE" || true
+    sudo umount "$MOUNT_POINT" > /dev/null 2>&1 || true
+    sudo mkdir -p "$MOUNT_POINT"
     if [[ "$fs_type" == "xfs" ]]; then
         sudo mkfs.xfs -f "$DEVICE"
     else
@@ -69,7 +60,7 @@ prepare_testdir() {
     local test_dir="$1"
 
     sudo rm -rf "$MOUNT_POINT/testdir" "$MOUNT_POINT/testdir_copy" "$MOUNT_POINT/testdir.tar"
-    sudo cp -r "$test_dir" "$MOUNT_POINT/testdir"
+    sudo cp -a "$test_dir" "$MOUNT_POINT/testdir"
 }
 
 run_case() {
@@ -89,18 +80,18 @@ run_case() {
 
     echo "start_${tested}_scache"
 
-    setup_scache
     sync
     if [[ "$drop_cache_mode" == "commented" ]]; then
-        # echo 3 | sudo tee /proc/sys/vm/drop_caches
-        :
+        find "$MOUNT_POINT/testdir" -maxdepth 2 -type f -print0 2>/dev/null | xargs -0 -r cat > /dev/null || true
     else
-        echo 3 | sudo tee /proc/sys/vm/drop_caches
+        echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null
     fi
+
+    setup_scache
 
     start=$(date +%s.%N)
     if [[ "$operation" == "cp" ]]; then
-        command=(taskset -c "$CPU_AFFINITY" sudo cp --reflink=never -r "$MOUNT_POINT/testdir" "$MOUNT_POINT/testdir_copy")
+        command=(taskset -c "$CPU_AFFINITY" sudo cp --reflink=never -a "$MOUNT_POINT/testdir" "$MOUNT_POINT/testdir_copy")
     else
         command=(taskset -c "$CPU_AFFINITY" sudo tar -c -b 512 -f "$MOUNT_POINT/testdir.tar" "$MOUNT_POINT/testdir")
     fi
@@ -115,11 +106,16 @@ run_case() {
 
     sudo cat /sys/kernel/stats/stats | tee "$TEST_PATH/stat_${tested}.scache.log"
     echo "${operation} time is : ${elapsed}s" | tee "$TEST_PATH/result_${tested}.scache.log"
+    printf 'case_id=%s\nfs=%s\nmode=scache\nsource=%s\noperation=%s\ncache_mode=%s\nread_ahead_kb=%s\norig_read_ahead_kb=%s\nelapsed_s=%s\n' \
+        "$tested" "$fs_type" "$source_label" "$operation" "$drop_cache_mode" "$COMMAND_TOOLS_ACTIVE_READ_AHEAD_KB" "$COMMAND_TOOLS_ORIG_READ_AHEAD_KB" "$elapsed" \
+        > "$TEST_PATH/metrics_${tested}.scache.env"
 
     teardown_scache
 
     echo "end_${tested}_scache"
 }
+
+command_tools_set_readahead "$DEVICE" "$COMMAND_READ_AHEAD_KB" "$TEST_PATH/read_ahead.env" "command-tools scache"
 
 for fs_type in $FS_TYPES; do
     run_case "$fs_type" "linux" "$LINUX_DIR" "cp" "commented"

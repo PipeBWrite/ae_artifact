@@ -5,8 +5,9 @@
 # permanent loss). Kafka runs last. fio/kafka configs are switched to scache
 # mode for this run and reverted on exit.
 set -u
+# shellcheck source=scripts/ae_common.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ae_common.sh"
-cd "$AE_ROOT"
+cd "$AE_ROOT" || exit
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -27,6 +28,10 @@ EOF
       ;;
   esac
 done
+
+preflight_device
+export_device_majmin
+run_envsetup
 
 # The shared configuration enables `set -euo pipefail`; this suite tolerates per-stage
 # failures (captures rc and continues), so drop -e/pipefail here.
@@ -66,7 +71,8 @@ stage ycsb_scache env -C "$YCSB_CPP_DIR" OUTPUT_DIR="$OUT/ycsb" WORKLOADS="a b f
 
 # 2. command-line tools scache (cp/tar, linux warm + generate_dir cold, ext4+xfs)
 stage cmd_scache env DEVICE="$AE_DEVICE" MOUNT_POINT="$AE_MOUNT" FS_TYPES="ext4 xfs" \
-  SCACHE_NR_REGIONS=80 TEST_PATH="$OUT/command" AE_ROOT="$AE_ROOT" LINUX_DIR="$LINUX_DIR" bash "$COMMAND_TEST_DIR/scache_run.sh"
+  STAT_DISK_NUM="$AE_DEVICE_MAJMIN" SCACHE_NR_REGIONS=80 COMMAND_READ_AHEAD_KB=4096 \
+  TEST_PATH="$OUT/command" AE_ROOT="$AE_ROOT" LINUX_DIR="$LINUX_DIR" bash "$COMMAND_TEST_DIR/scache_run.sh"
 
 # 3. FIO scache
 stage fio_scache env AE_FIO_INODE_NUMS="scache" bash "$AE_SCRIPT_DIR/run_fio_synthetic.sh"

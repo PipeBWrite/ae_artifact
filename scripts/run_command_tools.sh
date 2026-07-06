@@ -2,7 +2,10 @@
 
 set -euo pipefail
 
+# shellcheck source=scripts/ae_common.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ae_common.sh"
+# shellcheck source=scripts/command_tools_config.sh
+source "$AE_SCRIPT_DIR/command_tools_config.sh"
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
@@ -71,77 +74,12 @@ modes="orig async"
 command_source_dir="${COMMAND_SOURCE_DIR:-$LINUX_DIR}"
 command_source_label="${COMMAND_SOURCE_LABEL:-linux}"
 command_read_ahead_kb="4096"
-read_ahead_sysfs=""
-orig_read_ahead_kb=""
-active_read_ahead_kb=""
 
 require_dir "$command_source_dir"
 
-write_sysfs() {
-	local value="$1"
-	local path="$2"
-	if [[ -e "$path" ]]; then
-		local current=""
-		current="$(sudo cat "$path" 2>/dev/null | head -n 1 || true)"
-		if [[ "$current" == "$value" ]]; then
-			return
-		fi
-		printf '%s\n' "$value" | sudo tee "$path" >/dev/null
-	fi
-}
-
-set_command_readahead() {
-	local dev_name
-	dev_name="$(basename "$AE_DEVICE")"
-	read_ahead_sysfs="/sys/class/block/$dev_name/queue/read_ahead_kb"
-	[[ -e "$read_ahead_sysfs" ]] || die "missing read-ahead control: $read_ahead_sysfs"
-
-	orig_read_ahead_kb="$(cat "$read_ahead_sysfs")"
-	printf '%s\n' "$command_read_ahead_kb" | sudo tee "$read_ahead_sysfs" >/dev/null
-	active_read_ahead_kb="$(cat "$read_ahead_sysfs")"
-	log "command-tools read_ahead_kb: $orig_read_ahead_kb -> $active_read_ahead_kb ($read_ahead_sysfs)"
-	printf 'path=%s\norig_read_ahead_kb=%s\nactive_read_ahead_kb=%s\n' \
-		"$read_ahead_sysfs" "$orig_read_ahead_kb" "$active_read_ahead_kb" >"$out_dir/read_ahead.env"
-}
-
-restore_command_readahead() {
-	if [[ -n "$read_ahead_sysfs" && -n "$orig_read_ahead_kb" && -e "$read_ahead_sysfs" ]]; then
-		printf '%s\n' "$orig_read_ahead_kb" | sudo tee "$read_ahead_sysfs" >/dev/null 2>&1 || true
-	fi
-}
-
 configure_mode() {
 	local mode="$1"
-	write_sysfs "$AE_DEVICE_MAJMIN" /sys/kernel/stats/stats_allowed_dev_name
-	write_sysfs 0 /sys/kernel/stats/stats
-	write_sysfs 0 /sys/fs/sc_memory/enabled
-	write_sysfs -1 /sys/fs/dsa_emu/dsa_emu_thread_numa
-	write_sysfs 0 /sys/fs/dsa_emu/enable_bdp
-	write_sysfs 0 /sys/fs/dsa_emu/force_node
-	write_sysfs 0 /sys/fs/dsa_emu/force_node_nid
-	write_sysfs 0 /proc/sys/kernel/numa_balancing
-	write_sysfs 2 /sys/fs/dsa_emu/fpool_lock_wait_count
-
-	case "$mode" in
-		orig)
-			write_sysfs 0 /sys/kernel/stats/bg_allowed_dev_name
-			write_sysfs 0 /sys/fs/dsa_emu/num_threads
-			write_sysfs 0 /sys/fs/dsa_emu/prefetch
-			write_sysfs 0 /sys/fs/dsa_emu/no_zero_alloc
-			;;
-		async)
-			write_sysfs "$AE_DEVICE_MAJMIN" /sys/kernel/stats/bg_allowed_dev_name
-			write_sysfs 16 /sys/fs/dsa_emu/num_threads
-			write_sysfs 1 /sys/fs/dsa_emu/prefetch
-			write_sysfs 40 /sys/fs/dsa_emu/fg_alloc_threshold
-			write_sysfs 2 /sys/fs/dsa_emu/force_node
-			write_sysfs 1 /sys/fs/dsa_emu/no_zero_alloc
-			;;
-		*)
-			die "unknown mode: $mode"
-			;;
-	esac
-	write_sysfs 1 /sys/kernel/stats/thread_init
+	command_tools_configure_mode "$mode" "$AE_DEVICE_MAJMIN" || die "unknown mode: $mode"
 }
 
 prepare_mount() {
@@ -197,17 +135,18 @@ run_case() {
 	end="$(date +%s.%N)"
 	elapsed="$(awk -v e="$end" -v s="$start" 'BEGIN { printf "%.6f", e - s }')"
 
+	# shellcheck disable=SC2024 # sudo applies to the sysfs read; redirect writes to the user-owned result file.
 	sudo cat /sys/kernel/stats/stats >"$case_dir/stats.log" 2>/dev/null || true
 	printf 'case_id=%s\nfs=%s\nmode=%s\nsource=%s\noperation=%s\ncache_mode=%s\nread_ahead_kb=%s\norig_read_ahead_kb=%s\nelapsed_s=%s\nrc=%s\n' \
-		"$case_id" "$fs" "$mode" "$source_label" "$op" "$cache_mode" "$active_read_ahead_kb" "$orig_read_ahead_kb" "$elapsed" "$rc" >"$case_dir/metrics.env"
+		"$case_id" "$fs" "$mode" "$source_label" "$op" "$cache_mode" "$COMMAND_TOOLS_ACTIVE_READ_AHEAD_KB" "$COMMAND_TOOLS_ORIG_READ_AHEAD_KB" "$elapsed" "$rc" >"$case_dir/metrics.env"
 	printf '%s,%s,%s,%s,%s,%s,%s,%s\n' \
 		"$fs" "$mode" "$source_label" "$op" "$cache_mode" "$elapsed" "$rc" "$case_dir" >>"$out_dir/metrics.csv"
 
 	sudo umount "$AE_MOUNT" >/dev/null 2>&1 || true
 }
 
-set_command_readahead
-trap restore_command_readahead EXIT
+command_tools_set_readahead "$AE_DEVICE" "$command_read_ahead_kb" "$out_dir/read_ahead.env" "[ae] command-tools" || die "failed to set command-tools readahead"
+trap command_tools_restore_readahead EXIT
 
 printf 'fs,mode,source,operation,cache_mode,elapsed_s,rc,case_dir\n' >"$out_dir/metrics.csv"
 
